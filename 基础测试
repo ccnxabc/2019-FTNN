@@ -1,0 +1,59 @@
+# coding=utf-8
+# Pycharm 为何不能调试异步接收信息？即使断点放在pd.set_option也不行---人品问题
+#订阅了两个行情函数以及相关处理方式---2018.12.20
+#
+import time
+from futu import *
+from numpy import *
+import pandas as pd
+
+pd.set_option('display.max_rows', 500)
+pd.set_option('display.max_columns', 500)
+pd.set_option('display.width', 1000)
+
+fo = open("C:\\9\\foo.txt", "a")
+
+class OrderBookTest(OrderBookHandlerBase):
+    def on_recv_rsp(self, rsp_str):
+        ret_code, data = super(OrderBookTest,self).on_recv_rsp(rsp_str)
+        if ret_code != RET_OK:
+            print("OrderBookTest: error, msg: %s" % data)
+            return RET_ERROR, data
+
+        #data是dict类型；'Ask'和'Bid'是两个关键字；另外也可以data.get('Ask')或者data.get('Bid')
+        print(data['Ask'])
+        print("OrderBookTest ", data) # OrderBookTest自己的处理逻辑
+        fo.write("OrderBookTest ")
+        fo.write(str(data))
+        fo.write("\n")
+
+        return RET_OK, data
+
+class TickerTest(TickerHandlerBase):
+        def on_recv_rsp(self, rsp_str):
+                ret_code, data = super(TickerTest,self).on_recv_rsp(rsp_str)
+                if ret_code != RET_OK:
+                        print("CurKlineTest: error, msg: %s" % data)
+                        return RET_ERROR, data
+
+                #在callback函数里，使用jetbrain的命令行（调试很有可能只针对主函数内）无法print相关的data变量
+                print(data.price)
+                print("TickerTest ", data) # TickerTest自己的处理逻辑
+                fo.write("OrderBookTest ")
+                fo.write(str(data))
+                fo.write("\n")
+
+                return RET_OK, data
+
+quote_ctx = OpenQuoteContext(host='127.0.0.1', port=11111)
+handler = OrderBookTest()
+quote_ctx.set_handler(handler)
+quote_ctx.subscribe(['HK.00700'], [SubType.ORDER_BOOK])
+
+handler = TickerTest()
+quote_ctx.set_handler(handler)
+quote_ctx.subscribe(['HK.00700'], [SubType.TICKER])
+
+time.sleep(15000)
+fo.close()
+quote_ctx.close()
