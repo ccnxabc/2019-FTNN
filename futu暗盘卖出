@@ -1,0 +1,106 @@
+# coding=utf-8
+# Pycharm 为何不能调试异步接收信息？即使断点放在pd.set_option也不行---人品问题
+#订阅了两个行情函数以及相关处理方式---2018.12.20
+#暗盘卖出测试---2018.01.11
+#
+import time
+from futu import *
+from numpy import *
+import pandas as pd
+import time
+#-----首先修改这里-----
+STOCK_CODE='HK.01767'
+#1、IPO最终定价多少
+BENCHMARK_PRICE= 0.5
+#2、可以忍受亏损比例
+PERCENT_2_LOST= 0.05
+#3、自动算出允许损失的绝对值。benchmark是阶段最高价，当现价与最高价之差，大于或等于该ZHI_SUN(止损值），将执行卖出。这里严格遵守纪律！
+ZHI_SUN=BENCHMARK_PRICE*PERCENT_2_LOST
+#只卖一次标记
+SELL_ONCE=1
+
+
+pd.set_option('display.max_rows', 500)
+pd.set_option('display.max_columns', 500)
+pd.set_option('display.width', 1000)
+
+fo = open("C:\\9\\foo.txt", "a")
+
+class OrderBookTest(OrderBookHandlerBase):
+    def on_recv_rsp(self, rsp_str):
+        ret_code, data = super(OrderBookTest,self).on_recv_rsp(rsp_str)
+        if ret_code != RET_OK:
+            print("OrderBookTest: error, msg: %s" % data)
+            return RET_ERROR, data
+
+        #data是dict类型；'Ask'和'Bid'是两个关键字；另外也可以data.get('Ask')或者data.get('Bid')
+        print(data['Ask'])
+        print("OrderBookTest ", data) # OrderBookTest自己的处理逻辑
+        fo.write("OrderBookTest ")
+        fo.write(str(data))
+        fo.write("\n")
+
+        return RET_OK, data
+
+class TickerTest(TickerHandlerBase):
+        def on_recv_rsp(self, rsp_str):
+                time0=time.time()
+                ret_code, data = super(TickerTest,self).on_recv_rsp(rsp_str)
+                if ret_code != RET_OK:
+                        print("CurKlineTest: error, msg: %s" % data)
+                        return RET_ERROR, data
+
+                #在callback函数里，使用jetbrain的命令行（调试很有可能只针对主函数内）无法print相关的data变量
+                #print(data.price)
+                #print("TickerTest ", data) # TickerTest自己的处理逻辑
+                #fo.write("OrderBookTest ")
+                #fo.write(str(data))
+                #fo.write("\n")
+
+                time1=time.time()
+                b=quote_ctx.get_market_snapshot([ STOCK_CODE])
+                time2=time.time()
+                a=b[1]
+                #print(a.high_price[-1])
+                print(a)
+                high_price_now=a.high_price[a.index[-1]]
+                if high_price_now-data.price[data.price.index[-1]]>=ZHI_SUN:
+                    print("SELL OUT")
+                    print(a.high_price[a.index[-1]])
+                    print(data)
+                    if SELL_ONCE==1:
+                        fo.write("SELL OUT")
+                        fo.write("\n")
+                        fo.write(str(data))
+                        fo.write("\n")
+                        SELL_ONCE=0
+                        fo.close()
+                    #print(time.time()-time1)
+                    #print(time1-time0)
+                    #print(time2-time1)
+                    #一旦检测到符合条件，使用打印log模拟卖出，然后停止订阅逐笔交易行情，不再触发该处理函数
+                    quote_ctx.unsubscribe([STOCK_CODE], [SubType.TICKER])
+                return RET_OK, data
+
+quote_ctx = OpenQuoteContext(host='127.0.0.1', port=11111)
+
+print(quote_ctx.get_market_snapshot([ STOCK_CODE]))
+print("------")
+b=quote_ctx.get_market_snapshot([ STOCK_CODE])
+a=b[1]
+print(a.code)
+print(a.high_price)
+c=b[0]
+#print((quote_ctx.get_market_snapshot([ STOCK_CODE])).high_price)
+
+#handler = OrderBookTest()
+#quote_ctx.set_handler(handler)
+#quote_ctx.subscribe([STOCK_CODE], [SubType.ORDER_BOOK])
+
+handler = TickerTest()
+quote_ctx.set_handler(handler)
+quote_ctx.subscribe([STOCK_CODE], [SubType.TICKER])
+
+time.sleep(15000)
+fo.close()
+quote_ctx.close()
