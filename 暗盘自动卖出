@@ -1,0 +1,151 @@
+# coding=utf-8
+#本程序使用python 3.x
+# Pycharm 为何不能调试异步接收信息？即使断点放在pd.set_option也不行---人品问题
+#订阅了两个行情函数以及相关处理方式---2018.12.20
+#暗盘卖出测试---2018.01.11
+#不使用get_market_snapshot获取最高价，因为有30次/30秒限制。改用get_stock_quote，待测试。---2018.1.11;测试OK---2018。1.14
+#加入弹出提示
+import time
+from futu import *
+from numpy import *
+import pandas as pd
+import time
+#python 2.x
+#import Tkinter
+#import tkMessageBox
+
+#python 3.x
+import tkinter
+import tkinter.messagebox
+
+#-----首先修改这里-----
+STOCK_CODE='HK.03321'
+#1、IPO最终定价多少
+BENCHMARK_PRICE= 1.4
+#2、可以忍受亏损比例
+PERCENT_2_LOST= 0.05
+#3、自动算出允许损失的绝对值。benchmark是阶段最高价，当现价与最高价之差，大于或等于该ZHI_SUN(止损值），将执行卖出。这里严格遵守纪律！
+ZHI_SUN=BENCHMARK_PRICE*PERCENT_2_LOST
+#只卖一次标记
+global SELL_ONCE
+SELL_ONCE=1
+
+
+#https://www.cnblogs.com/hester/p/4898580.html
+#不显示window root窗口
+#python3.x
+top = tkinter.Tk()
+top.withdraw()
+
+#tkinter.messagebox.showinfo("SELL!","123")
+
+pd.set_option('display.max_rows', 500)
+pd.set_option('display.max_columns', 500)
+pd.set_option('display.width', 1000)
+
+fo = open("C:\\9\\foo.txt", "a")
+
+
+class OrderBookTest(OrderBookHandlerBase):
+    def on_recv_rsp(self, rsp_str):
+        ret_code, data = super(OrderBookTest,self).on_recv_rsp(rsp_str)
+        if ret_code != RET_OK:
+            print("OrderBookTest: error, msg: %s" % data)
+            return RET_ERROR, data
+
+        #data是dict类型；'Ask'和'Bid'是两个关键字；另外也可以data.get('Ask')或者data.get('Bid')
+        print(data['Ask'])
+        print("OrderBookTest ", data) # OrderBookTest自己的处理逻辑
+        fo.write("OrderBookTest ")
+        fo.write(str(data))
+        fo.write("\n")
+
+        return RET_OK, data
+
+class TickerTest(TickerHandlerBase):
+        def on_recv_rsp(self, rsp_str):
+                time0=time.time()
+                ret_code, data = super(TickerTest,self).on_recv_rsp(rsp_str)
+                if ret_code != RET_OK:
+                        print("CurKlineTest: error, msg: %s" % data)
+                        return RET_ERROR, data
+
+                #在callback函数里，使用jetbrain的命令行（调试很有可能只针对主函数内）无法print相关的data变量
+                #print(data.price)
+                #print("TickerTest ", data) # TickerTest自己的处理逻辑
+                #fo.write("OrderBookTest ")
+                #fo.write(str(data))
+                #fo.write("\n")
+
+                global SELL_ONCE
+
+                time1=time.time()
+                #b=quote_ctx.get_market_snapshot([ STOCK_CODE])
+                b=quote_ctx.get_stock_quote(STOCK_CODE)
+                time2=time.time()
+                a=b[1]
+                #print(a.high_price[-1])
+                print(a)
+                high_price_now=a.high_price[a.index[-1]]
+                if high_price_now-data.price[data.price.index[-1]]>=ZHI_SUN:
+                    print("SELL OUT")
+                    print(time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(time.time())))
+                    print(a.high_price[a.index[-1]])
+                    print(data)
+                    if SELL_ONCE==1:
+                        fo.write("\n")
+                        fo.write("SELL OUT")
+                        fo.write("\n")
+                        fo.write(time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(time.time())))
+                        fo.write("\n")
+                        fo.write("High_Now:")
+                        fo.write(str(a.high_price[a.index[-1]]))
+                        fo.write("\n")
+                        fo.write(str(data))
+                        fo.write("\n")
+                        SELL_ONCE=0
+                        fo.close()
+                        #python 2.x
+                        #tkMessageBox.showinfo("SELL!", str(data.price[data.price.index[-1]]))
+                        #python 3.x-----20190315测试失败！
+                        tkinter.messagebox.showinfo("SELL!","SELL@"+str(data.price[data.price.index[-1]]))
+                        #top.mainloop()
+                        #time.sleep(10)
+                    #print(time.time()-time1)
+                    #print(time1-time0)
+                    #print(time2-time1)
+                    #一旦检测到符合条件，使用打印log模拟卖出，然后停止订阅逐笔交易行情，不再触发该处理函数；但好像无效（api手册说好像是一段时间后才能取消）
+                    quote_ctx.unsubscribe([STOCK_CODE], [SubType.TICKER])
+                return RET_OK, data
+
+quote_ctx = OpenQuoteContext(host='127.0.0.1', port=11111)
+
+print(quote_ctx.get_market_snapshot([ STOCK_CODE]))
+print("------")
+b=quote_ctx.get_market_snapshot([ STOCK_CODE])
+a=b[1]
+print(a.code)
+print(a.high_price)
+c=b[0]
+#print((quote_ctx.get_market_snapshot([ STOCK_CODE])).high_price)
+
+#handler = OrderBookTest()
+#quote_ctx.set_handler(handler)
+#quote_ctx.subscribe([STOCK_CODE], [SubType.ORDER_BOOK])
+
+#为了获得"quote"中的high_price：print(quote_ctx.get_stock_quote(STOCK_CODE))
+quote_ctx.subscribe(STOCK_CODE, [SubType.QUOTE])
+#print(quote_ctx.get_stock_quote(STOCK_CODE))
+
+handler = TickerTest()
+quote_ctx.set_handler(handler)
+quote_ctx.subscribe([STOCK_CODE], [SubType.TICKER])
+
+print(quote_ctx.get_rt_ticker(STOCK_CODE, 10))
+
+#未如预期。自己想法是mainloop和其他程序是并行处理，但现在是卡在这里没往下执行
+top.mainloop()
+
+time.sleep(15000)
+fo.close()
+quote_ctx.close()
